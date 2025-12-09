@@ -126,6 +126,7 @@ class Bomb(pg.sprite.Sprite):
         self.rect.centerx = emy.rect.centerx
         self.rect.centery = emy.rect.centery+emy.rect.height//2
         self.speed = 6
+        self.state = "active"
 
     def update(self):
         """
@@ -134,6 +135,44 @@ class Bomb(pg.sprite.Sprite):
         """
         self.rect.move_ip(self.speed*self.vx, self.speed*self.vy)
         if check_bound(self.rect) != (True, True):
+            self.kill()
+
+
+class EMP(pg.sprite.Sprite):
+    """
+    追加機能3：電気パルス（EMP)に関するクラス
+
+    """
+    def __init__(self,emy: "pg.sprite.Group",bomb:"pg.sprite.Group",screen: pg.Surface):
+        """
+        EMPクラスのイニシャライザ
+        引数に（Enemyインスタンスのグループ，
+        Bombインスタンスのグループ，画面Surface）を渡す
+        ・無効化
+        　・敵機：爆弾投下できなくなる・ラプラシアンフィルタがかかる
+        　・爆弾：動きが遅くなる・ぶつかっても起動せず消滅
+        ・見た目：画面全体に透明度のある黄色の矩形を0.05秒表示
+        ・発動条件：「e」キー押下、かつ、スコア20以上
+        ・消費スコア：20
+        """
+        super().__init__()
+        self.image = pg.Surface((WIDTH,HEIGHT))
+        self.rect = self.image.get_rect()
+        pg.draw.rect(self.image,(255,255,0),(0,0,WIDTH,HEIGHT))
+        self.image.set_alpha(70)  # 背景完成
+        self.life = 3
+        for en in emy:
+            en.dis = True
+            en.interval = float('inf')
+            en.image = pg.transform.laplacian(en.image)
+        
+        for bo in bomb:
+            bo.speed *= 0.5
+            bo.state = "inactive"
+
+    def update(self):
+        self.life -= 1
+        if self.life < 0:
             self.kill()
 
 
@@ -255,6 +294,7 @@ class Enemy(pg.sprite.Sprite):
         self.bound = random.randint(50, HEIGHT//2)  # 停止位置
         self.state = "down"  # 降下状態or停止状態
         self.interval = random.randint(50, 300)  # 爆弾投下インターバル
+        self.dis = False  # EMPで無効化されたか
 
     def update(self):
         """
@@ -262,6 +302,11 @@ class Enemy(pg.sprite.Sprite):
         ランダムに決めた停止位置_boundまで降下したら，_stateを停止状態に変更する
         引数 screen：画面Surface
         """
+        if self.dis:
+            self.interval = float('inf')
+            self.vy = 0
+            return  # Enemyインスタンスを無効化
+        
         if self.rect.centery > self.bound:
             self.vy = 0
             self.state = "stop"
@@ -321,6 +366,7 @@ def main():
     beams = pg.sprite.Group()
     exps = pg.sprite.Group()
     emys = pg.sprite.Group()
+    emps = pg.sprite.Group()
     gravity = pg.sprite.Group()
     shields = pg.sprite.Group()
 
@@ -328,11 +374,16 @@ def main():
     clock = pg.time.Clock()
     while True:
         key_lst = pg.key.get_pressed()
+
         for event in pg.event.get():
             if event.type == pg.QUIT:
                 return 0
             if event.type == pg.KEYDOWN and event.key == pg.K_SPACE:
                 beams.add(Beam(bird))
+            if event.type == pg.KEYDOWN and event.key == pg.K_e:
+                if score.value >= 20:
+                    score.value -=20
+                    emps.add(EMP(emys,bombs,screen))
             if event.type == pg.KEYDOWN and event.key == pg.K_RETURN:  # リターン(エンター)キー押下
                 if score.value >= 200:  # スコアが200より大きいとき
                     score.value -= 200  # スコア200消費
@@ -364,11 +415,14 @@ def main():
         pg.sprite.groupcollide(shields, bombs, False, True)
 
         for bomb in pg.sprite.spritecollide(bird, bombs, True):  # こうかとんと衝突した爆弾リスト
-            bird.change_img(8, screen)  # こうかとん悲しみエフェクト
-            score.update(screen)
-            pg.display.update()
-            time.sleep(2)
-            return
+            if bomb.state == "inactive":
+                continue
+            if pg.sprite.collide_rect(bird, bomb):
+                bird.change_img(8, screen)  # こうかとん悲しみエフェクト
+                score.update(screen)
+                pg.display.update()
+                time.sleep(2)
+                return
         
         for grv in gravity:
             for bomb in pg.sprite.spritecollide(grv, bombs, True):  # 重力場発動時の範囲内の爆弾リスト
@@ -388,7 +442,9 @@ def main():
         bombs.update()
         bombs.draw(screen)
         exps.update()
+        emps.update()
         exps.draw(screen)
+        emps.draw(screen)
         gravity.update()
         gravity.draw(screen)
         shields.update()
